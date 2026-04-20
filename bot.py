@@ -17,7 +17,7 @@ from aiohttp import web
 BOT_TOKEN = "6162146726:AAGjWYQlcPXXp4sdh5BkfIRCiHDhBqNaTFs"
 PERSONAL_USERNAME = "PX_MrM"      # без @
 CHANNEL_USERNAME = "@твой_канал"         # для информации
-ADMIN_USER_ID = 123456789                # твой ID
+ADMIN_USER_ID = "1423028519"                # твой ID
 
 DB_NAME = "database.db"
 WEBAPP_URL = "#"   # ← замени на реальный HTTPS URL
