@@ -224,54 +224,52 @@ async def channel_post_handler(message: Message):
 
 
 # ====================== ЗАПУСК ======================
-    # ====================== ЗАПУСК ======================
-    async def main():
-        await init_db()
+async def main():
+    await init_db()
 
-        app = web.Application()
+    app = web.Application()
 
-        # === ТВОИ API ===
-        app.router.add_post('/api/stars', lambda r: api_handler(r, "stars"))
-        app.router.add_post('/api/categories', lambda r: api_handler(r, "categories"))
-        app.router.add_post('/api/paid', lambda r: api_handler(r, "paid"))
-        app.router.add_post('/api/comments', api_comments)
+    # API-роуты
+    app.router.add_post('/api/stars', lambda r: api_handler(r, "stars"))
+    app.router.add_post('/api/categories', lambda r: api_handler(r, "categories"))
+    app.router.add_post('/api/paid', lambda r: api_handler(r, "paid"))
+    app.router.add_post('/api/comments', api_comments)
 
-        # === РАЗДАЧА СТАТИКИ ДЛЯ WEBAPP ===
-        static_dir = os.path.join(os.getcwd(), "static")
-        if os.path.exists(static_dir):
-            app.router.add_static('/static/', static_dir, name='static')
-            logging.info(f"✅ Static files served from /static/ → {static_dir}")
-        else:
-            logging.warning("⚠️ Папка 'static' не найдена в репозитории! WebApp не загрузится.")
+    # Раздача статики (если есть папка static)
+    static_dir = os.path.join(os.getcwd(), "static")
+    if os.path.exists(static_dir):
+        app.router.add_static('/static/', static_dir, name='static')
+        logging.info("Static files served from /static/")
+    else:
+        logging.warning("Папка static не найдена!")
 
-        # === WEBHOOK AIogram ===
-        from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+    # Webhook aiogram
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-        WEBHOOK_PATH = f"/bot/{BOT_TOKEN}"
-        BASE_URL = os.getenv("RENDER_EXTERNAL_URL") or "https://px-only.onrender.com"
-        webhook_url = f"{BASE_URL}{WEBHOOK_PATH}"
+    WEBHOOK_PATH = f"/bot/{BOT_TOKEN}"
+    BASE_URL = os.getenv("RENDER_EXTERNAL_URL") or "https://px-only.onrender.com"
+    webhook_url = f"{BASE_URL}{WEBHOOK_PATH}"
 
-        webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-        webhook_handler.register(app, path=WEBHOOK_PATH)
-        setup_application(app, dp, bot=bot)
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
 
-        # === ЗАПУСК СЕРВЕРА ===
-        runner = web.AppRunner(app)
-        await runner.setup()
-        port = int(os.getenv("PORT", 8080))
-        site = web.TCPSite(runner, '0.0.0.0', port)
-        await site.start()
+    # Запуск сервера
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
 
-        logging.info(f"🚀 Сервер запущен на порту {port}")
-        logging.info(f"✅ Webhook: {webhook_url}")
-        logging.info("✅ WebApp доступен по /static/index.html")
+    logging.info(f"🚀 Сервер запущен на порту {port}")
+    logging.info(f"✅ Webhook: {webhook_url}")
 
-        # Держим сервер живым
-        try:
-            while True:
-                await asyncio.sleep(3600)
-        finally:
-            await runner.cleanup()
+    # Держим процесс живым
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        await runner.cleanup()
 
 
 if __name__ == "__main__":
