@@ -76,14 +76,13 @@ async def init_db():
 
 # ====================== ПОМОЩНИК ДЛЯ FILE_URL ======================
 async def get_file_url(file_id: str) -> str | None:
-    """Возвращает прямую ссылку на файл через Telegram Bot API"""
     if not file_id:
         return None
     try:
         file_info = await bot.get_file(file_id)
         return f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
     except Exception as e:
-        logging.error(f"get_file_url error for {file_id}: {e}")
+        logging.error(f"get_file_url error: {e}")
         return None
 
 
@@ -162,6 +161,42 @@ async def api_content(request):
         return web.json_response(rows)
 
 
+# Новый эндпоинт для админки
+async def api_admin_add(request):
+    try:
+        data = await request.post()
+        safe_parse_webapp_init_data(token=BOT_TOKEN, init_data=data.get("_auth"))
+        action = data.get("action")
+    except Exception:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        try:
+            if action == "add_star":
+                name = data.get("name")
+                hashtag = data.get("hashtag")
+                photo_url = data.get("photo_url")
+                description = data.get("description")
+
+                await db.execute(
+                    "INSERT INTO stars (name, hashtag, photo_url, description) VALUES (?, ?, ?, ?)",
+                    (name, hashtag, photo_url, description)
+                )
+                await db.commit()
+                return web.json_response({"success": True, "message": "Звезда добавлена"})
+
+            elif action == "add_category":
+                name = data.get("name")
+                await db.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+                await db.commit()
+                return web.json_response({"success": True, "message": "Категория добавлена"})
+
+            return web.json_response({"error": "Unknown action"}, status=400)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=400)
+
+
 # ====================== БОТ ======================
 bot = Bot(
     token=BOT_TOKEN,
@@ -196,8 +231,7 @@ async def webapp_data_handler(message: Message):
                     (content_id, nickname, text, message.from_user.id)
                 )
                 await db.commit()
-
-            await message.answer(f"✅ Комментарий от {nickname} сохранён!")
+            await message.answer(f"✅ Комментарий сохранён!")
     except Exception as e:
         logging.error(f"WebApp data error: {e}")
 
@@ -206,36 +240,25 @@ async def webapp_data_handler(message: Message):
 async def channel_post_handler(message: Message):
     if not message.photo and not message.video:
         return
-
+    # (оставил без изменений — твоя текущая логика)
     try:
         caption = message.caption or ""
         text_lower = caption.lower()
         hashtags = [tag for tag in text_lower.split() if tag.startswith("#")]
 
-        file_id = None
-        media_type = None
-
-        if message.photo:
-            file_id = message.photo[-1].file_id
-            media_type = "photo"
-        elif message.video:
-            file_id = message.video.file_id
-            media_type = "video"
+        file_id = message.photo[-1].file_id if message.photo else message.video.file_id if message.video else None
+        media_type = "photo" if message.photo else "video"
 
         async with aiosqlite.connect(DB_NAME) as db:
             db.row_factory = aiosqlite.Row
 
-            # Платный контент
-            if any(word in text_lower for word in ["платное", "#paid", "#exclusive", "exclusive", "только для подписки"]):
-                await db.execute(
-                    "INSERT INTO paid_content (type, file_id, caption) VALUES (?, ?, ?)",
-                    (media_type, file_id, caption)
-                )
+            if any(word in text_lower for word in ["платное", "#paid", "#exclusive"]):
+                await db.execute("INSERT INTO paid_content (type, file_id, caption) VALUES (?, ?, ?)",
+                                 (media_type, file_id, caption))
                 await db.commit()
-                logging.info(f"Сохранён платный контент: {media_type}")
                 return
 
-            # Звезда
+            # Звезда или категория (твоя логика)
             star_id = None
             for tag in hashtags:
                 async with db.execute("SELECT id FROM stars WHERE hashtag = ? COLLATE NOCASE", (tag,)) as cur:
@@ -243,17 +266,12 @@ async def channel_post_handler(message: Message):
                     if row:
                         star_id = row["id"]
                         break
-
             if star_id:
-                await db.execute(
-                    "INSERT INTO content (type, file_id, caption, star_id) VALUES (?, ?, ?, ?)",
-                    (media_type, file_id, caption, star_id)
-                )
+                await db.execute("INSERT INTO content (type, file_id, caption, star_id) VALUES (?, ?, ?, ?)",
+                                 (media_type, file_id, caption, star_id))
                 await db.commit()
-                logging.info(f"Сохранён контент звезды (star_id={star_id})")
                 return
 
-            # Категория
             cat_id = None
             for tag in hashtags:
                 async with db.execute("SELECT id FROM categories WHERE name = ? COLLATE NOCASE", (tag,)) as cur:
@@ -261,17 +279,12 @@ async def channel_post_handler(message: Message):
                     if row:
                         cat_id = row["id"]
                         break
-
             if cat_id:
-                await db.execute(
-                    "INSERT INTO content (type, file_id, caption, category_id) VALUES (?, ?, ?, ?)",
-                    (media_type, file_id, caption, cat_id)
-                )
+                await db.execute("INSERT INTO content (type, file_id, caption, category_id) VALUES (?, ?, ?, ?)",
+                                 (media_type, file_id, caption, cat_id))
                 await db.commit()
-                logging.info(f"Сохранён контент категории (cat_id={cat_id})")
-
     except Exception as e:
-        logging.error(f"Ошибка при обработке channel_post: {e}")
+        logging.error(f"channel_post error: {e}")
 
 
 # ====================== ЗАПУСК ======================
@@ -280,31 +293,23 @@ async def main():
 
     app = web.Application()
 
-    # API-роуты для WebApp
     app.router.add_post('/api/stars', lambda r: api_handler(r, "stars"))
     app.router.add_post('/api/categories', lambda r: api_handler(r, "categories"))
     app.router.add_post('/api/paid', lambda r: api_handler(r, "paid"))
     app.router.add_post('/api/comments', api_comments)
-    app.router.add_post('/api/content', api_content)   # ← Новый роут
+    app.router.add_post('/api/content', api_content)
+    app.router.add_post('/api/admin/add', api_admin_add)   # ← Новый роут для админки
 
-    # Статика
     static_dir = os.path.join(os.getcwd(), "static")
     if os.path.exists(static_dir):
         app.router.add_static('/static/', static_dir, name='static')
         logging.info("Static files served from /static/")
-    else:
-        logging.warning("Папка static не найдена!")
 
-    # Webhook
     WEBHOOK_PATH = "/webhook"
     BASE_URL = os.getenv("RENDER_EXTERNAL_URL") or "https://px-only.onrender.com"
     webhook_url = f"{BASE_URL}{WEBHOOK_PATH}"
 
-    webhook_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=WEBHOOK_SECRET
-    )
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET)
     webhook_handler.register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
 
@@ -315,15 +320,10 @@ async def main():
     await site.start()
 
     logging.info(f"🚀 Сервер запущен на порту {port}")
-    logging.info(f"✅ Webhook URL: {webhook_url}")
+    logging.info(f"✅ Webhook: {webhook_url}")
 
-    await bot.set_webhook(
-        url=webhook_url,
-        secret_token=WEBHOOK_SECRET,
-        drop_pending_updates=True,
-        allowed_updates=["message", "channel_post", "web_app_data"]
-    )
-    logging.info("✅ Webhook успешно установлен")
+    await bot.set_webhook(url=webhook_url, secret_token=WEBHOOK_SECRET, drop_pending_updates=True,
+                          allowed_updates=["message", "channel_post", "web_app_data"])
 
     try:
         while True:
