@@ -50,17 +50,17 @@
                 <form id="add-model-form" class="space-y-5">
                     <div>
                         <label class="block text-sm mb-1">Model Name</label>
-                        <input type="text" id="model-name" placeholder="Aaliyah Love" 
+                        <input type="text" name="name_ru" id="model-name" placeholder="Aaliyah Love" 
                                class="w-full bg-zinc-800 p-4 rounded-2xl" required>
                     </div>
                     <div>
                         <label class="block text-sm mb-1">Cover Photo</label>
-                        <input type="file" id="model-cover" accept="image/*" 
+                        <input type="file" name="cover" id="model-cover" accept="image/*" 
                                class="w-full bg-zinc-800 p-4 rounded-2xl" required>
                     </div>
                     <div>
                         <label class="block text-sm mb-1">Hashtag</label>
-                        <input type="text" id="model-hashtag" placeholder="#AaliyahLove" 
+                        <input type="text" name="hashtags" id="model-hashtag" placeholder="#AaliyahLove" 
                                class="w-full bg-zinc-800 p-4 rounded-2xl">
                     </div>
                     <button type="submit" 
@@ -117,7 +117,7 @@
             document.getElementById('admin-panel').classList.toggle('hidden');
         }
 
-        // Добавление модели — исправленная версия
+        // Добавление модели
         document.getElementById('add-model-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -138,13 +138,13 @@
                     document.getElementById('add-model-form').reset();
                     fetchAndRender();
                 } else {
-                    const errorData = await res.json().catch(() => ({}));
-                    console.error("Server error:", errorData);
-                    alert('Error: ' + (errorData.detail || JSON.stringify(errorData)));
+                    const error = await res.json().catch(() => ({}));
+                    console.error(error);
+                    alert('Error: ' + (error.detail || 'Failed to add model'));
                 }
             } catch (err) {
                 console.error(err);
-                alert('Connection error. Check console for details.');
+                alert('Connection error. Please try again.');
             }
         });
 
