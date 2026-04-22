@@ -2,7 +2,7 @@ import os
 import json
 from pathlib import Path
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import cloudinary
 import cloudinary.uploader
@@ -105,7 +105,7 @@ def save_data(data):
 
 app_data = load_data()
 
-# ===================== ЗАГРУЗКА В CLOUDINARY =====================
+# ===================== ЗАГРУЗКА =====================
 async def upload_to_cloudinary(file: UploadFile, resource_type: str = "auto"):
     contents = await file.read()
     result = cloudinary.uploader.upload(
@@ -140,11 +140,14 @@ async def add_model(
     cover: UploadFile = File(...)
 ):
     if not is_admin(initData):
-        raise HTTPException(403, "Доступ запрещён")
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    cover_url = await upload_to_cloudinary(cover, "image")
+    try:
+        cover_url = await upload_to_cloudinary(cover, "image")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cloudinary upload failed: {str(e)}")
 
-    new_id = max((m["id"] for m in app_data["models"]), default=0) + 1
+    new_id = max((m.get("id", 0) for m in app_data["models"]), default=0) + 1
 
     model = {
         "id": new_id,
@@ -158,7 +161,7 @@ async def add_model(
     app_data["models"].append(model)
     save_data(app_data)
 
-    return {"success": True, "id": new_id}
+    return {"success": True, "id": new_id, "message": "Model added successfully"}
 
 # ===================== ПОЛУЧЕНИЕ МОДЕЛЕЙ =====================
 @app.get("/api/models")
@@ -166,7 +169,7 @@ async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
     items = app_data["models"]
     if search:
         s = search.lower()
-        items = [m for m in items if s in m.get("name_ru", "").lower() or s in m.get("name_en", "").lower()]
+        items = [m for m in items if s in str(m.get("name_ru", "")).lower() or s in str(m.get("name_en", "")).lower()]
     total = len(items)
     start = (page - 1) * limit
     return {
@@ -180,11 +183,11 @@ async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
 @app.delete("/api/models/{model_id}")
 async def delete_model(model_id: int, request: Request):
     if not is_admin(request.headers.get("X-Telegram-Init-Data", "")):
-        raise HTTPException(403, "Доступ запрещён")
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
 
     model = next((m for m in app_data["models"] if m["id"] == model_id), None)
     if not model:
-        raise HTTPException(404, "Модель не найдена")
+        raise HTTPException(status_code=404, detail="Модель не найдена")
 
     await delete_from_cloudinary(model.get("cover_url"), "image")
     for media in model.get("media", []):
