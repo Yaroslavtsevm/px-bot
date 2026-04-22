@@ -113,9 +113,9 @@ async def check_admin(request: Request):
 @app.post("/api/models")
 async def add_model(
     initData: str = Form(...),
-    name_ru: str = Form(..., alias="model-name"),      # соответствует id в HTML
-    hashtags: str = Form("", alias="model-hashtag"),   # соответствует id в HTML
-    cover: UploadFile = File(..., alias="model-cover") # соответствует id в HTML
+    name_ru: str = Form(...),
+    hashtags: str = Form(""),
+    cover: UploadFile = File(...)
 ):
     if not is_admin(initData):
         raise HTTPException(status_code=403, detail="Доступ запрещён")
