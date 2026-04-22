@@ -1,14 +1,15 @@
 import os
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
-from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import cloudinary
 import cloudinary.uploader
+import cloudinary.api
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 from urllib.parse import parse_qsl, unquote_plus
@@ -40,7 +41,6 @@ def validate_init_data(init_data: str) -> dict | None:
             return None
 
         data_check_string = "\n".join(sorted(f"{key}={value}" for key, value in data_dict.items()))
-
         secret_key = hmac_new(key=b"WebAppData", msg=BOT_TOKEN.encode(), digestmod=sha256).digest()
         calculated_hash = hmac_new(key=secret_key, msg=data_check_string.encode(), digestmod=sha256).hexdigest()
 
@@ -58,6 +58,32 @@ def is_admin(init_data_str: str) -> bool:
     if not user_data or "user" not in user_data:
         return False
     return user_data["user"].get("id") == ADMIN_USER_ID
+
+# ===================== УТИЛИТЫ CLOUDINARY =====================
+def get_public_id_from_url(url: str) -> str:
+    """Извлекает public_id из Cloudinary URL"""
+    try:
+        # Пример: https://res.cloudinary.com/.../upload/v123456/pornoxram/filename.jpg
+        parts = url.split('/upload/')
+        if len(parts) > 1:
+            path = parts[1].split('?')[0]  # убираем query params
+            # Убираем версию v123456/ если есть
+            if path.startswith('v'):
+                path = '/'.join(path.split('/')[1:])
+            return path.rsplit('.', 1)[0]  # без расширения
+        return url
+    except:
+        return url
+
+async def delete_from_cloudinary(url: str, resource_type: str = "image"):
+    """Удаляет файл из Cloudinary"""
+    if not url:
+        return
+    try:
+        public_id = get_public_id_from_url(url)
+        cloudinary.uploader.destroy(public_id, resource_type=resource_type)
+    except Exception as e:
+        print(f"Cloudinary delete error: {e}")
 
 # ===================== ДАННЫЕ =====================
 def load_data():
@@ -82,23 +108,62 @@ async def check_admin(request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data")
     return {"is_admin": bool(init_data) and is_admin(init_data)}
 
+# Пагинация + поиск
 @app.get("/api/models")
-async def get_models():
-    return app_data["models"]
+async def get_models(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: str = Query(None)
+):
+    models = app_data["models"]
+    if search:
+        search = search.lower()
+        models = [m for m in models if search in m["name_ru"].lower() or search in m["name_en"].lower()]
+    
+    total = len(models)
+    start = (page - 1) * limit
+    end = start + limit
+    return {
+        "items": models[start:end],
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }
 
 @app.get("/api/categories")
-async def get_categories():
-    return app_data["categories"]
+async def get_categories(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    search: str = Query(None)
+):
+    cats = app_data["categories"]
+    if search:
+        search = search.lower()
+        cats = [c for c in cats if search in c["hashtag"].lower()]
+    
+    total = len(cats)
+    start = (page - 1) * limit
+    end = start + limit
+    return {
+        "items": cats[start:end],
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }
 
-# ===================== ЗАГРУЗКА В CLOUDINARY =====================
+# ===================== ЗАГРУЗКА С ОПТИМИЗАЦИЕЙ =====================
 async def upload_to_cloudinary(file: UploadFile, resource_type: str = "auto"):
-    """Загружает файл в Cloudinary и возвращает secure_url"""
+    """Загружает файл с оптимизацией"""
     result = cloudinary.uploader.upload(
         file.file,
-        resource_type=resource_type,   # auto / image / video
+        resource_type=resource_type,
         folder="pornoxram",
         use_filename=True,
-        unique_filename=True
+        unique_filename=True,
+        transformation=[
+            {"width": 1200, "crop": "limit"},   # максимальная ширина
+            {"quality": "auto", "fetch_format": "auto"}  # q_auto + f_auto
+        ]
     )
     return result["secure_url"]
 
@@ -132,7 +197,7 @@ async def add_model(
 async def add_media_to_model(
     model_id: int,
     initData: str = Form(...),
-    type: str = Form(...),                    # "photo" или "video"
+    type: str = Form(...),
     description_ru: str = Form(""),
     description_en: str = Form(""),
     file: UploadFile = File(...)
@@ -201,12 +266,25 @@ async def add_media_to_category(
     save_data(app_data)
     return {"success": True}
 
-# Удаление (пока только из базы, файлы в Cloudinary остаются)
+# ===================== УДАЛЕНИЕ С CLOUDINARY =====================
 @app.delete("/api/models/{model_id}")
 async def delete_model(model_id: int, request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data")
     if not is_admin(init_data):
         raise HTTPException(403)
+
+    model = next((m for m in app_data["models"] if m["id"] == model_id), None)
+    if not model:
+        raise HTTPException(404)
+
+    # Удаляем обложку
+    await delete_from_cloudinary(model.get("cover_url"), "image")
+
+    # Удаляем все медиа
+    for media in model.get("media", []):
+        rt = "video" if media.get("type") == "video" else "image"
+        await delete_from_cloudinary(media.get("url"), rt)
+
     app_data["models"] = [m for m in app_data["models"] if m["id"] != model_id]
     save_data(app_data)
     return {"success": True}
@@ -216,6 +294,15 @@ async def delete_category(cat_id: int, request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data")
     if not is_admin(init_data):
         raise HTTPException(403)
+
+    cat = next((c for c in app_data["categories"] if c["id"] == cat_id), None)
+    if not cat:
+        raise HTTPException(404)
+
+    for media in cat.get("media", []):
+        rt = "video" if media.get("type") == "video" else "image"
+        await delete_from_cloudinary(media.get("url"), rt)
+
     app_data["categories"] = [c for c in app_data["categories"] if c["id"] != cat_id]
     save_data(app_data)
     return {"success": True}
