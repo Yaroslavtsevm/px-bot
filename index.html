@@ -7,21 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap');
-        body { 
-            background: linear-gradient(180deg, #1a0033 0%, #000000 100%); 
-            color: white; 
-        }
-        .header-text { 
-            font-family: 'Playfair Display', serif; 
-            font-size: 2.8rem; 
-            background: linear-gradient(90deg, #ff00aa, #aa00ff, #00ffff); 
-            -webkit-background-clip: text; 
-            -webkit-text-fill-color: transparent; 
-        }
-        .media-card:hover { 
-            transform: scale(1.05); 
-            box-shadow: 0 0 25px rgba(255,0,170,0.7); 
-        }
+        body { background: linear-gradient(180deg, #1a0033 0%, #000000 100%); color: white; }
+        .header-text { font-family: 'Playfair Display', serif; font-size: 2.8rem; background: linear-gradient(90deg, #ff00aa, #aa00ff, #00ffff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .media-card:hover { transform: scale(1.05); box-shadow: 0 0 25px rgba(255,0,170,0.7); }
     </style>
 </head>
 <body class="min-h-screen pb-32">
@@ -33,7 +21,6 @@
                    class="w-full bg-zinc-900 rounded-3xl px-6 py-4 text-lg outline-none focus:ring-2 focus:ring-pink-500">
         </div>
 
-        <!-- Кнопка админа -->
         <div class="flex justify-end mb-6">
             <button onclick="toggleAdminPanel()" id="admin-btn" 
                     class="bg-gradient-to-r from-pink-600 to-purple-600 px-8 py-3 rounded-3xl text-white font-bold text-lg">
@@ -60,24 +47,18 @@
             </div>
 
             <div class="p-6 overflow-auto" style="max-height: calc(94vh - 80px);">
-                <!-- Форма добавления -->
                 <div class="bg-zinc-800 rounded-3xl p-6 mb-10">
                     <h3 class="text-xl font-bold mb-4">Add New Model</h3>
                     <form id="add-model-form" class="space-y-4">
-                        <input type="text" id="model-name" placeholder="Model Name *" 
-                               class="w-full bg-zinc-900 p-4 rounded-2xl" required>
-                        <input type="file" id="model-cover" accept="image/*" 
-                               class="w-full bg-zinc-900 p-4 rounded-2xl" required>
-                        <input type="text" id="model-hashtags" placeholder="#hashtag1 #hashtag2" 
-                               class="w-full bg-zinc-900 p-4 rounded-2xl">
-                        <button type="submit" 
-                                class="w-full bg-pink-600 hover:bg-pink-700 py-4 rounded-3xl font-bold text-lg">
+                        <input type="text" id="model-name" placeholder="Model Name *" class="w-full bg-zinc-900 p-4 rounded-2xl" required>
+                        <input type="file" id="model-cover" accept="image/*" class="w-full bg-zinc-900 p-4 rounded-2xl" required>
+                        <input type="text" id="model-hashtags" placeholder="#hashtag1 #hashtag2" class="w-full bg-zinc-900 p-4 rounded-2xl">
+                        <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 py-4 rounded-3xl font-bold text-lg">
                             Add Model
                         </button>
                     </form>
                 </div>
 
-                <!-- Список моделей -->
                 <div id="admin-list" class="space-y-6"></div>
             </div>
         </div>
@@ -91,8 +72,7 @@
 
         function checkAdminMode() {
             const params = new URLSearchParams(window.location.search);
-            // Показываем кнопку админа, если в ссылке есть параметр admin=true
-            if (params.get('admin') === 'true' || window.location.href.includes('admin=true')) {
+            if (params.get('admin') === 'true') {
                 document.getElementById('admin-btn').classList.remove('hidden');
             }
         }
@@ -126,7 +106,7 @@
 
         function openModelChannel(hashtags) {
             let url = CHANNEL_LINK;
-            if (hashtags && hashtags.trim() !== '') {
+            if (hashtags && hashtags.trim()) {
                 url += `?q=${encodeURIComponent(hashtags.trim())}`;
             }
             window.open(url, "_blank");
@@ -148,26 +128,25 @@
             models.forEach(model => {
                 html += `
                     <div class="bg-zinc-800 rounded-3xl p-6">
-                        <div class="flex justify-between items-start">
+                        <div class="flex justify-between">
                             <div>
                                 <p class="text-xl font-medium">${model.name_ru || model.name_en}</p>
                                 <p class="text-pink-400 text-sm">${model.hashtags || ''}</p>
                             </div>
-                            <button onclick="deleteModel(${model.id})" class="bg-red-600 hover:bg-red-700 px-5 py-2 rounded-2xl text-sm">Delete</button>
+                            <button onclick="deleteModel(${model.id})" class="bg-red-600 px-5 py-2 rounded-2xl text-sm">Delete</button>
                         </div>
                     </div>`;
             });
-
             document.getElementById('admin-list').innerHTML = html || '<p class="text-gray-400 text-center py-10">No models yet</p>';
         }
 
         async function deleteModel(id) {
-            if (!confirm('Delete this model?')) return;
+            if (!confirm('Delete model?')) return;
             await fetch(`/api/models/${id}`, { method: 'DELETE' });
             loadAdminModels();
         }
 
-        // Добавление модели
+        // Добавление модели — исправленная версия
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('add-model-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -180,17 +159,22 @@
                 formData.append('cover', document.getElementById('model-cover').files[0]);
 
                 try {
-                    const res = await fetch('/api/models', { method: 'POST', body: formData });
+                    const res = await fetch('/api/models', {
+                        method: 'POST',
+                        body: formData
+                    });
+
                     if (res.ok) {
                         alert('Model added successfully!');
                         document.getElementById('add-model-form').reset();
                         loadAdminModels();
-                        fetchAndRender();
+                        fetchAndRender();   // обновляем главную страницу
                     } else {
-                        alert('Error adding model');
+                        const errorText = await res.text();
+                        alert('Error: ' + (errorText || 'Failed to add model'));
                     }
                 } catch (err) {
-                    alert('Connection error');
+                    alert('Connection error. Please try again.');
                 }
             });
         });
