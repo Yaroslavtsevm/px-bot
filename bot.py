@@ -4,23 +4,30 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import cloudinary
+import cloudinary.uploader
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 from urllib.parse import parse_qsl, unquote_plus
 
 app = FastAPI(title="PornoXram API")
 
+# ===================== CLOUDINARY =====================
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    secure=True
+)
+
 # ===================== НАСТРОЙКИ =====================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8313221258:AAG9XsV4y1fJ-z5tpccc9t9eesJRzXMhpwI")
-ADMIN_USER_ID = 1423028519  # ID аккаунта @PX_MrM
+ADMIN_USER_ID = 1423028519
 
-MEDIA_DIR = Path("static/media")
 DATA_FILE = Path("data/data.json")
-
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # ===================== ВАЛИДАЦИЯ INIT DATA =====================
@@ -32,21 +39,10 @@ def validate_init_data(init_data: str) -> dict | None:
         if not received_hash:
             return None
 
-        data_check_string = "\n".join(
-            sorted(f"{key}={value}" for key, value in data_dict.items())
-        )
+        data_check_string = "\n".join(sorted(f"{key}={value}" for key, value in data_dict.items()))
 
-        secret_key = hmac_new(
-            key=b"WebAppData",
-            msg=BOT_TOKEN.encode(),
-            digestmod=sha256
-        ).digest()
-
-        calculated_hash = hmac_new(
-            key=secret_key,
-            msg=data_check_string.encode(),
-            digestmod=sha256
-        ).hexdigest()
+        secret_key = hmac_new(key=b"WebAppData", msg=BOT_TOKEN.encode(), digestmod=sha256).digest()
+        calculated_hash = hmac_new(key=secret_key, msg=data_check_string.encode(), digestmod=sha256).hexdigest()
 
         if not compare_digest(calculated_hash, received_hash):
             return None
@@ -76,14 +72,11 @@ def save_data(data):
 
 app_data = load_data()
 
-# ===================== СТАТИКА =====================
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
+# ===================== API =====================
 @app.get("/")
 async def root():
     return FileResponse("index.html")
 
-# ===================== API =====================
 @app.get("/api/check_admin")
 async def check_admin(request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data")
@@ -97,6 +90,18 @@ async def get_models():
 async def get_categories():
     return app_data["categories"]
 
+# ===================== ЗАГРУЗКА В CLOUDINARY =====================
+async def upload_to_cloudinary(file: UploadFile, resource_type: str = "auto"):
+    """Загружает файл в Cloudinary и возвращает secure_url"""
+    result = cloudinary.uploader.upload(
+        file.file,
+        resource_type=resource_type,   # auto / image / video
+        folder="pornoxram",
+        use_filename=True,
+        unique_filename=True
+    )
+    return result["secure_url"]
+
 # === МОДЕЛИ ===
 @app.post("/api/models")
 async def add_model(
@@ -106,19 +111,12 @@ async def add_model(
     cover: UploadFile = File(...)
 ):
     if not is_admin(initData):
-        raise HTTPException(403, "Только админ")
-    
-    # Сохраняем обложку
-    filename = f"cover_{uuid4().hex}_{cover.filename}"
-    file_path = MEDIA_DIR / filename
-    with open(file_path, "wb") as f:
-        f.write(await cover.read())
-    
-    cover_url = f"/static/media/{filename}"
-    
-    # Новый ID
+        raise HTTPException(403, "Доступ запрещён")
+
+    cover_url = await upload_to_cloudinary(cover, resource_type="image")
+
     new_id = max((m["id"] for m in app_data["models"]), default=0) + 1
-    
+
     model = {
         "id": new_id,
         "name_ru": name_ru,
@@ -134,25 +132,21 @@ async def add_model(
 async def add_media_to_model(
     model_id: int,
     initData: str = Form(...),
-    type: str = Form(...),
+    type: str = Form(...),                    # "photo" или "video"
     description_ru: str = Form(""),
     description_en: str = Form(""),
     file: UploadFile = File(...)
 ):
     if not is_admin(initData):
-        raise HTTPException(403, "Только админ")
-    
+        raise HTTPException(403, "Доступ запрещён")
+
     model = next((m for m in app_data["models"] if m["id"] == model_id), None)
     if not model:
-        raise HTTPException(404)
-    
-    filename = f"{type}_{uuid4().hex}_{file.filename}"
-    file_path = MEDIA_DIR / filename
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-    
-    url = f"/static/media/{filename}"
-    
+        raise HTTPException(404, "Модель не найдена")
+
+    resource_type = "video" if type == "video" else "image"
+    url = await upload_to_cloudinary(file, resource_type=resource_type)
+
     media_item = {
         "id": len(model["media"]) + 1,
         "type": type,
@@ -164,32 +158,15 @@ async def add_media_to_model(
     save_data(app_data)
     return {"success": True}
 
-@app.delete("/api/models/{model_id}")
-async def delete_model(model_id: int, request: Request):
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    if not is_admin(init_data):
-        raise HTTPException(403)
-    
-    app_data["models"] = [m for m in app_data["models"] if m["id"] != model_id]
-    save_data(app_data)
-    return {"success": True}
-
 # === КАТЕГОРИИ ===
 @app.post("/api/categories")
-async def add_category(
-    initData: str = Form(...),
-    hashtag: str = Form(...)
-):
+async def add_category(initData: str = Form(...), hashtag: str = Form(...)):
     if not is_admin(initData):
-        raise HTTPException(403, "Только админ")
-    
+        raise HTTPException(403, "Доступ запрещён")
+
     new_id = max((c["id"] for c in app_data["categories"]), default=0) + 1
-    
-    cat = {
-        "id": new_id,
-        "hashtag": hashtag,
-        "media": []
-    }
+
+    cat = {"id": new_id, "hashtag": hashtag, "media": []}
     app_data["categories"].append(cat)
     save_data(app_data)
     return {"success": True, "id": new_id}
@@ -204,19 +181,15 @@ async def add_media_to_category(
     file: UploadFile = File(...)
 ):
     if not is_admin(initData):
-        raise HTTPException(403)
-    
+        raise HTTPException(403, "Доступ запрещён")
+
     cat = next((c for c in app_data["categories"] if c["id"] == cat_id), None)
     if not cat:
-        raise HTTPException(404)
-    
-    filename = f"{type}_{uuid4().hex}_{file.filename}"
-    file_path = MEDIA_DIR / filename
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-    
-    url = f"/static/media/{filename}"
-    
+        raise HTTPException(404, "Категория не найдена")
+
+    resource_type = "video" if type == "video" else "image"
+    url = await upload_to_cloudinary(file, resource_type=resource_type)
+
     media_item = {
         "id": len(cat["media"]) + 1,
         "type": type,
@@ -228,16 +201,25 @@ async def add_media_to_category(
     save_data(app_data)
     return {"success": True}
 
+# Удаление (пока только из базы, файлы в Cloudinary остаются)
+@app.delete("/api/models/{model_id}")
+async def delete_model(model_id: int, request: Request):
+    init_data = request.headers.get("X-Telegram-Init-Data")
+    if not is_admin(init_data):
+        raise HTTPException(403)
+    app_data["models"] = [m for m in app_data["models"] if m["id"] != model_id]
+    save_data(app_data)
+    return {"success": True}
+
 @app.delete("/api/categories/{cat_id}")
 async def delete_category(cat_id: int, request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data")
     if not is_admin(init_data):
         raise HTTPException(403)
-    
     app_data["categories"] = [c for c in app_data["categories"] if c["id"] != cat_id]
     save_data(app_data)
     return {"success": True}
 
 # ===================== ЗАПУСК =====================
 if __name__ == "__main__":
-    uvicorn.run("bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 10000)), reload=False)
+    uvicorn.run("bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
