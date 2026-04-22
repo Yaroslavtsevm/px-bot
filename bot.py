@@ -64,27 +64,18 @@ def is_admin(init_data_str: str) -> bool:
     data = validate_init_data(init_data_str)
     return data and data.get("user", {}).get("id") == ADMIN_USER_ID
 
-# ===================== CLOUDINARY HELPERS =====================
-def get_public_id(url: str) -> str:
-    try:
-        parts = url.split("/upload/")
-        if len(parts) > 1:
-            path = parts[1].split("?")[0]
-            if path.startswith("v"):
-                path = "/".join(path.split("/")[1:])
-            return path.rsplit(".", 1)[0]
-        return url
-    except:
-        return url
-
-async def delete_from_cloudinary(url: str, resource_type: str = "image"):
-    if not url:
-        return
-    try:
-        public_id = get_public_id(url)
-        cloudinary.uploader.destroy(public_id, resource_type=resource_type)
-    except Exception as e:
-        print(f"Cloudinary delete error: {e}")
+# ===================== CLOUDINARY =====================
+async def upload_to_cloudinary(file: UploadFile):
+    contents = await file.read()
+    result = cloudinary.uploader.upload(
+        contents,
+        resource_type="image",
+        folder="pornoxram",
+        use_filename=True,
+        unique_filename=True,
+        transformation=[{"width": 1200, "crop": "limit"}, {"quality": "auto"}]
+    )
+    return result["secure_url"]
 
 # ===================== ДАННЫЕ =====================
 def load_data():
@@ -94,29 +85,16 @@ def load_data():
                 return json.load(f)
         except Exception:
             pass
-    return {"models": [], "categories": []}
+    return {"models": []}
 
 def save_data(data):
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Save data error: {e}")
+        print(f"Save error: {e}")
 
 app_data = load_data()
-
-# ===================== ЗАГРУЗКА =====================
-async def upload_to_cloudinary(file: UploadFile, resource_type: str = "auto"):
-    contents = await file.read()
-    result = cloudinary.uploader.upload(
-        contents,
-        resource_type=resource_type,
-        folder="pornoxram",
-        use_filename=True,
-        unique_filename=True,
-        transformation=[{"width": 1200, "crop": "limit"}, {"quality": "auto", "fetch_format": "auto"}]
-    )
-    return result["secure_url"]
 
 # ===================== API =====================
 
@@ -131,7 +109,7 @@ async def check_admin(request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data", "")
     return {"is_admin": is_admin(init_data)}
 
-# ===================== ДОБАВЛЕНИЕ МОДЕЛИ =====================
+# ===================== ДОБАВЛЕНИЕ МОДЕЛИ (главный эндпоинт) =====================
 @app.post("/api/models")
 async def add_model(
     initData: str = Form(...),
@@ -142,17 +120,13 @@ async def add_model(
     if not is_admin(initData):
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    try:
-        cover_url = await upload_to_cloudinary(cover, "image")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cloudinary upload failed: {str(e)}")
+    cover_url = await upload_to_cloudinary(cover)
 
     new_id = max((m.get("id", 0) for m in app_data["models"]), default=0) + 1
 
     model = {
         "id": new_id,
         "name_ru": name_ru.strip(),
-        "name_en": "",
         "hashtags": hashtags.strip(),
         "cover_url": cover_url,
         "media": []
@@ -161,7 +135,7 @@ async def add_model(
     app_data["models"].append(model)
     save_data(app_data)
 
-    return {"success": True, "id": new_id, "message": "Model added successfully"}
+    return {"success": True, "id": new_id}
 
 # ===================== ПОЛУЧЕНИЕ МОДЕЛЕЙ =====================
 @app.get("/api/models")
@@ -169,7 +143,7 @@ async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
     items = app_data["models"]
     if search:
         s = search.lower()
-        items = [m for m in items if s in str(m.get("name_ru", "")).lower() or s in str(m.get("name_en", "")).lower()]
+        items = [m for m in items if s in str(m.get("name_ru", "")).lower()]
     total = len(items)
     start = (page - 1) * limit
     return {
@@ -184,15 +158,6 @@ async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
 async def delete_model(model_id: int, request: Request):
     if not is_admin(request.headers.get("X-Telegram-Init-Data", "")):
         raise HTTPException(status_code=403, detail="Доступ запрещён")
-
-    model = next((m for m in app_data["models"] if m["id"] == model_id), None)
-    if not model:
-        raise HTTPException(status_code=404, detail="Модель не найдена")
-
-    await delete_from_cloudinary(model.get("cover_url"), "image")
-    for media in model.get("media", []):
-        rt = "video" if media.get("type") == "video" else "image"
-        await delete_from_cloudinary(media.get("url"), rt)
 
     app_data["models"] = [m for m in app_data["models"] if m["id"] != model_id]
     save_data(app_data)
