@@ -23,7 +23,7 @@ cloudinary.config(
 # ===================== НАСТРОЙКИ =====================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8313221258:AAG9XsV4y1fJ-z5tpccc9t9eesJRzXMhpwI")
 ADMIN_USER_ID = 1423028519
-ADMIN_SECRET = "mrM311094"   # ← твой секретный ключ (можно изменить)
+ADMIN_SECRET = "mrM311094"
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -62,12 +62,10 @@ def validate_init_data(init_data: str) -> dict | None:
         return None
 
 def is_admin(init_data_str: str = None, secret: str = None) -> bool:
-    # Проверка через Telegram WebApp
     if init_data_str:
         data = validate_init_data(init_data_str)
         if data and data.get("user", {}).get("id") == ADMIN_USER_ID:
             return True
-    # Проверка через секретный ключ
     if secret == ADMIN_SECRET:
         return True
     return False
@@ -113,7 +111,7 @@ def save_data(data):
 
 app_data = load_data()
 
-# ===================== ЗАГРУЗКА =====================
+# ===================== ЗАГРУЗКА В CLOUDINARY =====================
 async def upload_to_cloudinary(file: UploadFile, resource_type: str = "auto"):
     contents = await file.read()
     result = cloudinary.uploader.upload(
@@ -140,7 +138,7 @@ async def check_admin(request: Request):
     secret = request.query_params.get("secret")
     return {"is_admin": is_admin(init_data, secret)}
 
-# ===================== СЕКРЕТНЫЙ ВХОД В АДМИНКУ =====================
+# ===================== СЕКРЕТНЫЙ ВХОД =====================
 @app.get("/api/admin")
 async def get_admin_access(request: Request):
     init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -154,9 +152,7 @@ async def get_admin_access(request: Request):
         "admin_url": "https://pornoxram.onrender.com/?admin=true"
     })
 
-# ===================== Остальные эндпоинты (модели и категории) =====================
-# (я оставил только основные, чтобы код не был слишком длинным. Если нужно — скажи, добавлю все)
-
+# ===================== МОДЕЛИ =====================
 @app.get("/api/models")
 async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=200), search: str = Query(None)):
     items = app_data["models"]
@@ -165,9 +161,59 @@ async def get_models(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
         items = [m for m in items if s in m.get("name_ru", "").lower() or s in m.get("name_en", "").lower()]
     total = len(items)
     start = (page - 1) * limit
-    return {"items": items[start:start + limit], "total": total, "page": page, "pages": (total + limit - 1) // limit}
+    return {
+        "items": items[start:start + limit],
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }
 
-# ... (добавь остальные эндпоинты из своего предыдущего кода: add_model, delete_model и т.д.)
+@app.post("/api/models")
+async def add_model(
+    initData: str = Form(...),
+    name_ru: str = Form(...),
+    name_en: str = Form(""),
+    hashtags: str = Form(""),
+    cover: UploadFile = File(...)
+):
+    if not is_admin(initData):
+        raise HTTPException(403, "Доступ запрещён")
+    
+    cover_url = await upload_to_cloudinary(cover, "image")
+    
+    new_id = max((m["id"] for m in app_data["models"]), default=0) + 1
+    
+    model = {
+        "id": new_id,
+        "name_ru": name_ru,
+        "name_en": name_en,
+        "hashtags": hashtags.strip(),
+        "cover_url": cover_url,
+        "media": []
+    }
+    
+    app_data["models"].append(model)
+    save_data(app_data)
+    
+    return {"success": True, "id": new_id}
+
+@app.delete("/api/models/{model_id}")
+async def delete_model(model_id: int, request: Request):
+    if not is_admin(request.headers.get("X-Telegram-Init-Data", "")):
+        raise HTTPException(403, "Доступ запрещён")
+    
+    model = next((m for m in app_data["models"] if m["id"] == model_id), None)
+    if not model:
+        raise HTTPException(404, "Модель не найдена")
+    
+    await delete_from_cloudinary(model.get("cover_url"), "image")
+    for media in model.get("media", []):
+        rt = "video" if media.get("type") == "video" else "image"
+        await delete_from_cloudinary(media.get("url"), rt)
+    
+    app_data["models"] = [m for m in app_data["models"] if m["id"] != model_id]
+    save_data(app_data)
+    return {"success": True}
 
 if __name__ == "__main__":
     import uvicorn
