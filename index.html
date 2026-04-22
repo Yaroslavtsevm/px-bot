@@ -21,9 +21,10 @@
                    class="w-full bg-zinc-900 rounded-3xl px-6 py-4 text-lg outline-none focus:ring-2 focus:ring-pink-500">
         </div>
 
+        <!-- Кнопка админа — только для тебя -->
         <div class="flex justify-end mb-6">
             <button onclick="toggleAdminPanel()" id="admin-btn" 
-                    class="bg-gradient-to-r from-pink-600 to-purple-600 px-8 py-3 rounded-3xl text-white font-bold text-lg">
+                    class="hidden bg-gradient-to-r from-pink-600 to-purple-600 px-8 py-3 rounded-3xl text-white font-bold text-lg">
                 👑 Admin Panel
             </button>
         </div>
@@ -52,7 +53,7 @@
                     <form id="add-model-form" class="space-y-4">
                         <input type="text" id="model-name" placeholder="Model Name *" class="w-full bg-zinc-900 p-4 rounded-2xl" required>
                         <input type="file" id="model-cover" accept="image/*" class="w-full bg-zinc-900 p-4 rounded-2xl" required>
-                        <input type="text" id="model-hashtags" placeholder="#hashtag1 #hashtag2" class="w-full bg-zinc-900 p-4 rounded-2xl">
+                        <input type="text" id="model-hashtag" placeholder="#hashtag" class="w-full bg-zinc-900 p-4 rounded-2xl">
                         <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 py-4 rounded-3xl font-bold text-lg">
                             Add Model
                         </button>
@@ -70,6 +71,7 @@
         const initData = window.Telegram?.WebApp?.initData || '';
         const CHANNEL_LINK = "https://t.me/+u8svaG24-xo5MDMy";
 
+        // Показываем кнопку админа ТОЛЬКО если есть параметр ?admin=true
         function checkAdminMode() {
             const params = new URLSearchParams(window.location.search);
             if (params.get('admin') === 'true') {
@@ -128,7 +130,7 @@
             models.forEach(model => {
                 html += `
                     <div class="bg-zinc-800 rounded-3xl p-6">
-                        <div class="flex justify-between">
+                        <div class="flex justify-between items-center">
                             <div>
                                 <p class="text-xl font-medium">${model.name_ru || model.name_en}</p>
                                 <p class="text-pink-400 text-sm">${model.hashtags || ''}</p>
@@ -141,12 +143,12 @@
         }
 
         async function deleteModel(id) {
-            if (!confirm('Delete model?')) return;
+            if (!confirm('Delete this model?')) return;
             await fetch(`/api/models/${id}`, { method: 'DELETE' });
             loadAdminModels();
         }
 
-        // Добавление модели — исправленная версия
+        // Добавление модели
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('add-model-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -154,24 +156,23 @@
                 const formData = new FormData();
                 formData.append('initData', initData);
                 formData.append('name_ru', document.getElementById('model-name').value.trim());
-                formData.append('name_en', '');
-                formData.append('hashtags', document.getElementById('model-hashtags').value.trim());
+                formData.append('hashtags', document.getElementById('model-hashtag').value.trim());
                 formData.append('cover', document.getElementById('model-cover').files[0]);
 
                 try {
-                    const res = await fetch('/api/models', {
-                        method: 'POST',
-                        body: formData
+                    const res = await fetch('/api/models', { 
+                        method: 'POST', 
+                        body: formData 
                     });
 
                     if (res.ok) {
                         alert('Model added successfully!');
                         document.getElementById('add-model-form').reset();
                         loadAdminModels();
-                        fetchAndRender();   // обновляем главную страницу
+                        fetchAndRender();
                     } else {
-                        const errorText = await res.text();
-                        alert('Error: ' + (errorText || 'Failed to add model'));
+                        const error = await res.json();
+                        alert('Error: ' + (error.detail || 'Failed to add model'));
                     }
                 } catch (err) {
                     alert('Connection error. Please try again.');
@@ -179,7 +180,6 @@
             });
         });
 
-        // Инициализация
         window.onload = () => {
             if (window.Telegram?.WebApp) window.Telegram.WebApp.expand();
             checkAdminMode();
