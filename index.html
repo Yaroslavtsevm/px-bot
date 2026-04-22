@@ -36,7 +36,7 @@
         <!-- Кнопка админа -->
         <div class="flex justify-end mb-6">
             <button onclick="toggleAdminPanel()" id="admin-btn" 
-                    class="hidden bg-gradient-to-r from-pink-600 to-purple-600 px-8 py-3 rounded-3xl text-white font-bold text-lg">
+                    class="bg-gradient-to-r from-pink-600 to-purple-600 px-8 py-3 rounded-3xl text-white font-bold text-lg">
                 👑 Admin Panel
             </button>
         </div>
@@ -44,14 +44,14 @@
         <div id="main-content" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </div>
 
-    <!-- Спонсирование на английском -->
+    <!-- Sponsorship -->
     <a href="https://t.me/PX_MrM" target="_blank"
        class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-pink-500 to-purple-600 text-white px-10 py-5 rounded-3xl shadow-2xl flex items-center gap-4 text-xl font-bold z-50">
         <span class="text-3xl">⭐</span>
         <div>Sponsorship <span class="text-sm opacity-90">@PX_MrM • Stars</span></div>
     </a>
 
-    <!-- ==================== АДМИН ПАНЕЛЬ ==================== -->
+    <!-- Админ-панель -->
     <div id="admin-panel" class="hidden fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4">
         <div class="bg-zinc-900 rounded-3xl w-full max-w-5xl max-h-[94vh] overflow-hidden">
             <div class="p-6 border-b border-zinc-700 flex justify-between items-center bg-zinc-950">
@@ -60,7 +60,7 @@
             </div>
 
             <div class="p-6 overflow-auto" style="max-height: calc(94vh - 80px);">
-                <!-- Форма добавления модели -->
+                <!-- Форма добавления -->
                 <div class="bg-zinc-800 rounded-3xl p-6 mb-10">
                     <h3 class="text-xl font-bold mb-4">Add New Model</h3>
                     <form id="add-model-form" class="space-y-4">
@@ -86,23 +86,13 @@
     <script>
         let currentPage = 1;
         let currentSearch = '';
-        let currentLang = localStorage.getItem('preferredLang') || 'ru';
         const initData = window.Telegram?.WebApp?.initData || '';
         const CHANNEL_LINK = "https://t.me/+u8svaG24-xo5MDMy";
 
-        function applyLanguage() {
-            document.getElementById('lang-text').textContent = currentLang.toUpperCase();
-        }
-
-        function toggleLanguage() {
-            currentLang = currentLang === 'ru' ? 'en' : 'ru';
-            localStorage.setItem('preferredLang', currentLang);
-            applyLanguage();
-        }
-
         function checkAdminMode() {
             const params = new URLSearchParams(window.location.search);
-            if (params.get('admin') === 'true') {
+            // Показываем кнопку админа, если в ссылке есть параметр admin=true
+            if (params.get('admin') === 'true' || window.location.href.includes('admin=true')) {
                 document.getElementById('admin-btn').classList.remove('hidden');
             }
         }
@@ -134,7 +124,6 @@
             container.innerHTML = html || '<p class="col-span-full text-center text-gray-400 py-12">No models yet</p>';
         }
 
-        // Открытие канала с хэштегами
         function openModelChannel(hashtags) {
             let url = CHANNEL_LINK;
             if (hashtags && hashtags.trim() !== '') {
@@ -150,7 +139,6 @@
             }
         }
 
-        // ===================== АДМИНКА =====================
         async function loadAdminModels() {
             const res = await fetch('/api/models?limit=100');
             const data = await res.json();
@@ -160,13 +148,12 @@
             models.forEach(model => {
                 html += `
                     <div class="bg-zinc-800 rounded-3xl p-6">
-                        <div class="flex justify-between items-start mb-4">
+                        <div class="flex justify-between items-start">
                             <div>
                                 <p class="text-xl font-medium">${model.name_ru || model.name_en}</p>
                                 <p class="text-pink-400 text-sm">${model.hashtags || ''}</p>
                             </div>
-                            <button onclick="deleteModel(${model.id})" 
-                                    class="bg-red-600 hover:bg-red-700 px-5 py-2 rounded-2xl text-sm">Delete</button>
+                            <button onclick="deleteModel(${model.id})" class="bg-red-600 hover:bg-red-700 px-5 py-2 rounded-2xl text-sm">Delete</button>
                         </div>
                     </div>`;
             });
@@ -200,8 +187,7 @@
                         loadAdminModels();
                         fetchAndRender();
                     } else {
-                        const err = await res.json();
-                        alert('Error: ' + (err.detail || 'Failed to add model'));
+                        alert('Error adding model');
                     }
                 } catch (err) {
                     alert('Connection error');
@@ -212,7 +198,6 @@
         // Инициализация
         window.onload = () => {
             if (window.Telegram?.WebApp) window.Telegram.WebApp.expand();
-            applyLanguage();
             checkAdminMode();
             fetchAndRender();
         };
