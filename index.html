@@ -17,7 +17,7 @@
         <h1 class="header-text text-center mb-10">PX Models</h1>
 
         <div class="mb-8">
-            <input id="search-input" type="text" placeholder="Search models..." 
+            <input id="search-input" type="text" placeholder="Поиск по имени или #хэштегу..." 
                    class="w-full bg-zinc-900 rounded-3xl px-6 py-4 text-lg outline-none focus:ring-2 focus:ring-pink-500">
         </div>
 
@@ -31,33 +31,33 @@
         <div id="main-content" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </div>
 
+    <!-- Sponsorship -->
     <a href="https://t.me/PX_MrM" target="_blank"
        class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-pink-500 to-purple-600 text-white px-10 py-5 rounded-3xl shadow-2xl flex items-center gap-4 text-xl font-bold z-50">
         <span class="text-3xl">⭐</span>
         <div>Sponsorship <span class="text-sm opacity-90">@PX_MrM • Stars</span></div>
     </a>
 
-    <!-- Админ панель -->
+    <!-- Админ панель (без изменений) -->
     <div id="admin-panel" class="hidden fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4">
         <div class="bg-zinc-900 rounded-3xl w-full max-w-lg">
             <div class="p-6 border-b border-zinc-700 flex justify-between bg-zinc-950">
                 <h2 class="text-3xl font-bold">👑 Admin Panel</h2>
                 <button onclick="toggleAdminPanel()" class="text-4xl text-pink-400">✕</button>
             </div>
-
             <div class="p-6">
                 <form id="add-model-form" class="space-y-5">
                     <div>
                         <label class="block text-sm mb-1">Имя модели</label>
-                        <input type="text" id="model-name" placeholder="Aaliyah Love" class="w-full bg-zinc-800 p-4 rounded-2xl" required>
+                        <input type="text" name="name_ru" id="model-name" placeholder="Aaliyah Love" class="w-full bg-zinc-800 p-4 rounded-2xl" required>
                     </div>
                     <div>
                         <label class="block text-sm mb-1">Обложка</label>
-                        <input type="file" id="model-cover" accept="image/*" class="w-full bg-zinc-800 p-4 rounded-2xl" required>
+                        <input type="file" name="cover" id="model-cover" accept="image/*" class="w-full bg-zinc-800 p-4 rounded-2xl" required>
                     </div>
                     <div>
-                        <label class="block text-sm mb-1">Хэштег (опционально)</label>
-                        <input type="text" id="model-hashtag" placeholder="#AaliyahLove" class="w-full bg-zinc-800 p-4 rounded-2xl">
+                        <label class="block text-sm mb-1">Хэштег (например #AaliyahLove)</label>
+                        <input type="text" name="hashtags" id="model-hashtag" placeholder="#AaliyahLove" class="w-full bg-zinc-800 p-4 rounded-2xl">
                     </div>
                     <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 py-5 rounded-3xl font-bold text-lg">
                         Добавить модель
@@ -69,23 +69,28 @@
 
     <script>
         const initData = window.Telegram?.WebApp?.initData || '';
+        let allModels = [];
 
-        function checkAdminMode() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('admin') === 'true') {
-                document.getElementById('admin-btn').classList.remove('hidden');
-            }
+        async function checkIfAdmin() {
+            if (!initData) return;
+            try {
+                const res = await fetch('/api/check_admin', {
+                    headers: { 'X-Telegram-Init-Data': initData }
+                });
+                const data = await res.json();
+                if (data.is_admin) {
+                    document.getElementById('admin-btn').classList.remove('hidden');
+                }
+            } catch (e) {}
         }
 
-        async function fetchAndRender() {
-            try {
-                const res = await fetch('/api/models?limit=50');
-                if (!res.ok) throw new Error('Failed to load');
-                const data = await res.json();
-                renderModels(data.items);
-            } catch (e) {
-                console.error(e);
-            }
+        async function loadModels(search = '') {
+            const url = `/api/models?limit=200&search=${encodeURIComponent(search)}`;
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const data = await res.json();
+            allModels = data.items;
+            renderModels(allModels);
         }
 
         function renderModels(models) {
@@ -94,61 +99,67 @@
             models.forEach(model => {
                 const title = model.name_ru || 'Unnamed';
                 const image = model.cover_url || 'https://via.placeholder.com/400x300/1a0033/ffffff?text=No+Image';
+                const tag = model.hashtags ? `<p class="text-pink-400 text-sm mt-1">#${model.hashtags.replace('#','')}</p>` : '';
                 html += `
-                    <div class="media-card bg-zinc-900 rounded-3xl overflow-hidden cursor-pointer" onclick="openChannel('${model.hashtags || ''}')">
+                    <div class="media-card bg-zinc-900 rounded-3xl overflow-hidden cursor-pointer" 
+                         onclick="openModel('${model.hashtags || ''}')">
                         <img src="${image}" class="w-full aspect-[4/3] object-cover">
-                        <div class="p-4 text-center"><p class="font-medium">${title}</p></div>
+                        <div class="p-4 text-center">
+                            <p class="font-medium">${title}</p>
+                            ${tag}
+                        </div>
                     </div>`;
             });
-            container.innerHTML = html || '<p class="text-center text-gray-400 py-12">Пока нет моделей</p>';
+            container.innerHTML = html || '<p class="text-center text-gray-400 py-12">Моделей пока нет</p>';
         }
 
-        function openChannel(hashtags) {
-            let url = "https://t.me/+u8svaG24-xo5MDMy";
-            if (hashtags) url += `?q=${encodeURIComponent(hashtags)}`;
-            window.open(url, "_blank");
+        function openModel(hashtags) {
+            window.open("https://t.me/+u8svaG24-xo5MDMy", "_blank");
+            if (hashtags) {
+                setTimeout(() => {
+                    alert(`✅ Канал открыт!\n\nИщите все посты этой модели по хэштегу:\n${hashtags}`);
+                }, 800);
+            }
         }
 
         function toggleAdminPanel() {
             document.getElementById('admin-panel').classList.toggle('hidden');
         }
 
-        // === ИСПРАВЛЕННАЯ ОТПРАВКА ===
+        // Добавление модели
         document.getElementById('add-model-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-
             const formData = new FormData();
-            formData.append('init_data', initData);           // ← ИЗМЕНЕНО на init_data
+            formData.append('initData', initData);
             formData.append('name_ru', document.getElementById('model-name').value.trim());
             formData.append('hashtags', document.getElementById('model-hashtag').value.trim());
             formData.append('cover', document.getElementById('model-cover').files[0]);
 
-            try {
-                const res = await fetch('/api/models', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (res.ok) {
-                    alert('✅ Модель успешно добавлена!');
-                    document.getElementById('add-model-form').reset();
-                    fetchAndRender();
-                    toggleAdminPanel();
-                } else {
-                    const error = await res.json().catch(() => ({}));
-                    alert(`❌ Ошибка: ${error.detail || res.statusText}`);
-                    console.error(error);
-                }
-            } catch (err) {
-                alert('Ошибка соединения. Проверьте интернет.');
-                console.error(err);
+            const res = await fetch('/api/models', { method: 'POST', body: formData });
+            if (res.ok) {
+                alert('✅ Модель успешно добавлена в канал!');
+                document.getElementById('add-model-form').reset();
+                loadModels(document.getElementById('search-input').value.trim());
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert('Ошибка: ' + (err.detail || 'Не удалось добавить'));
             }
+        });
+
+        // Поиск с debounce
+        const searchInput = document.getElementById('search-input');
+        let timeout;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                loadModels(searchInput.value.trim());
+            }, 300);
         });
 
         window.onload = () => {
             if (window.Telegram?.WebApp) window.Telegram.WebApp.expand();
-            checkAdminMode();
-            fetchAndRender();
+            checkIfAdmin();
+            loadModels();
         };
     </script>
 </body>
